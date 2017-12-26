@@ -24,15 +24,19 @@
     "binary-search-tree": "0.2.5",
     "localforage": "^1.3.0",
     "mkdirp": "~0.5.1",
+    "typescript": "^2.6.2",
     "underscore": "~1.4.4"
   },
   "devDependencies": {
+    "@types/node": "^8.5.2",
     "chai": "^3.2.0",
-    "mocha": "1.4.x",
-    "request": "2.9.x",
-    "sinon": "1.3.x",
+    "commander": "1.1.1",
     "exec-time": "0.0.2",
-    "commander": "1.1.1"
+    "mocha": "1.4.x",
+    "nicer-fs": "^2.0.0",
+    "prettier": "^1.9.2",
+    "request": "2.9.x",
+    "sinon": "1.3.x"
   },
   "scripts": {
     "test": "./node_modules/.bin/mocha --reporter spec --timeout 10000"
