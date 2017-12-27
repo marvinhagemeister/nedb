@@ -15,3 +15,7 @@ export function uid(len) {
     .replace(/[+\/]/g, "")
     .slice(0, len);
 }
+
+export function unique(array: any[]) {
+  return [...new Set(array)];
+}

@@ -23,11 +23,7 @@ export default class Executor {
       if (typeof lastArg === "function") {
         // Callback was supplied
         newArguments[newArguments.length - 1] = function() {
-          if (typeof setImmediate === "function") {
-            setImmediate(cb);
-          } else {
-            process.nextTick(cb);
-          }
+          process.nextTick(cb);
           lastArg.apply(null, arguments);
         };
       } else if (!lastArg && task.arguments.length !== 0) {
@@ -47,14 +43,8 @@ export default class Executor {
   }
 
   /**
-   * If executor is ready, queue task (and process it immediately if executor was idle)
-   * If not, buffer task for later processing
-   * @param {Object} task
-   *                 task.this - Object to use as this
-   *                 task.fn - Function to execute
-   *                 task.arguments - Array of arguments, IMPORTANT: only the last argument may be a function (the callback)
-   *                                                                 and the last argument cannot be false/undefined/null
-   * @param {Boolean} forceQueuing Optional (defaults to false) force executor to queue task even if it is not ready
+   * If executor is ready, queue task (and process it immediately if executor
+   * was idle). If not, buffer task for later processing
    */
   push(task: Task, forceQueuing: boolean = false) {
     if (this.ready || forceQueuing) {

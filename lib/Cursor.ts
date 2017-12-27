@@ -8,7 +8,7 @@ export default class Cursor {
   private _limit: number;
   private _skip: number;
   private _sort: any;
-  private _projection: any;
+  private _projection: Record<string, any>;
 
   constructor(private db, private query = {}) {}
 
@@ -38,7 +38,7 @@ export default class Cursor {
    * @param {Object} projection - MongoDB-style projection. {} means take all fields. Then it's { key1: 1, key2: 1 } to take only key1 and key2
    *                              { key1: 0, key2: 0 } to omit only key1 and key2. Except _id, you can't mix takes and omits
    */
-  projection(projection) {
+  projection(projection: Record<string, any>) {
     this._projection = projection;
     return this;
   }

@@ -4,11 +4,23 @@ import Persistence from "./persistence";
 import * as model from "./model";
 import Index, { IndexOptions } from "./indexes";
 import Cursor from "./Cursor";
+import { isDate } from "util";
 
 var customUtils = require("./customUtils"),
   async = require("async"),
-  util = require("util"),
   _ = require("underscore");
+
+export interface UpdateOptions {
+  /** If true, can update multiple documents */
+  multi?: boolean;
+  /** If true, document is inserted if the query doesn't match anything */
+  upsert?: boolean;
+  /**
+   * if true return as third argument the array of updated matched documents
+   * (even if no change actually took place)
+   */
+  returnUpdatedDocs?: boolean;
+}
 
 export interface DataStoreOptions {
   /** Datastore will be in-memory only if not provided */
@@ -64,7 +76,7 @@ export default class Datastore extends EventEmitter {
   private autoload: boolean;
   private timestampData: boolean;
   public filename: null | string;
-  private compareStrings?: Function;
+  public compareStrings?: Function;
   public executor: Executor;
   public persistence: Persistence;
 
@@ -228,7 +240,7 @@ export default class Datastore extends EventEmitter {
    * To update multiple documents, oldDoc must be an array of { oldDoc, newDoc } pairs
    * If one update violates a constraint, all changes are rolled back
    */
-  updateIndexes(oldDoc, newDoc) {
+  updateIndexes(oldDoc, newDoc?: any) {
     var i,
       failingIndex,
       error,
@@ -269,7 +281,6 @@ export default class Datastore extends EventEmitter {
    */
   async getCandidates(query, dontExpireStaleDocs = false) {
     var indexNames = Object.keys(this.indexes),
-      self = this,
       usableQueryKeys;
 
     async.waterfall([
@@ -277,12 +288,12 @@ export default class Datastore extends EventEmitter {
       function(cb) {
         // For a basic match
         usableQueryKeys = [];
-        Object.keys(query).forEach(function(k) {
+        Object.keys(query).forEach(k => {
           if (
             typeof query[k] === "string" ||
             typeof query[k] === "number" ||
             typeof query[k] === "boolean" ||
-            util.isDate(query[k]) ||
+            isDate(query[k]) ||
             query[k] === null
           ) {
             usableQueryKeys.push(k);
@@ -292,7 +303,7 @@ export default class Datastore extends EventEmitter {
         if (usableQueryKeys.length > 0) {
           return cb(
             null,
-            self.indexes[usableQueryKeys[0]].getMatching(
+            this.indexes[usableQueryKeys[0]].getMatching(
               query[usableQueryKeys[0]],
             ),
           );
@@ -300,7 +311,7 @@ export default class Datastore extends EventEmitter {
 
         // For a $in match
         usableQueryKeys = [];
-        Object.keys(query).forEach(function(k) {
+        Object.keys(query).forEach(k => {
           if (query[k] && query[k].hasOwnProperty("$in")) {
             usableQueryKeys.push(k);
           }
@@ -309,7 +320,7 @@ export default class Datastore extends EventEmitter {
         if (usableQueryKeys.length > 0) {
           return cb(
             null,
-            self.indexes[usableQueryKeys[0]].getMatching(
+            this.indexes[usableQueryKeys[0]].getMatching(
               query[usableQueryKeys[0]].$in,
             ),
           );
@@ -317,7 +328,7 @@ export default class Datastore extends EventEmitter {
 
         // For a comparison match
         usableQueryKeys = [];
-        Object.keys(query).forEach(function(k) {
+        Object.keys(query).forEach(k => {
           if (
             query[k] &&
             (query[k].hasOwnProperty("$lt") ||
@@ -332,14 +343,14 @@ export default class Datastore extends EventEmitter {
         if (usableQueryKeys.length > 0) {
           return cb(
             null,
-            self.indexes[usableQueryKeys[0]].getBetweenBounds(
+            this.indexes[usableQueryKeys[0]].getBetweenBounds(
               query[usableQueryKeys[0]],
             ),
           );
         }
 
         // By default, return all the DB data
-        return cb(null, self.getAllData());
+        return cb(null, this.getAllData());
       },
       // STEP 2: remove all expired documents
       function(docs) {
@@ -349,15 +360,15 @@ export default class Datastore extends EventEmitter {
 
         var expiredDocsIds = [],
           validDocs = [],
-          ttlIndexesFieldNames = Object.keys(self.ttlIndexes);
+          ttlIndexesFieldNames = Object.keys(this.ttlIndexes);
 
-        docs.forEach(function(doc) {
+        docs.forEach(doc => {
           var valid = true;
-          ttlIndexesFieldNames.forEach(function(i) {
+          ttlIndexesFieldNames.forEach(i => {
             if (
               doc[i] !== undefined &&
-              util.isDate(doc[i]) &&
-              Date.now() > doc[i].getTime() + self.ttlIndexes[i] * 1000
+              isDate(doc[i]) &&
+              Date.now() > doc[i].getTime() + this.ttlIndexes[i] * 1000
             ) {
               valid = false;
             }
@@ -372,7 +383,7 @@ export default class Datastore extends EventEmitter {
         async.eachSeries(
           expiredDocsIds,
           function(_id, cb) {
-            self._remove({ _id: _id }, {}, function(err) {
+            this._remove({ _id: _id }, {}, err => {
               if (err) {
                 return callback(err);
               }
@@ -418,25 +429,17 @@ export default class Datastore extends EventEmitter {
    * @api private
    */
   prepareDocumentForInsertion(newDoc) {
-    var preparedDoc,
-      self = this;
+    var preparedDoc;
 
-    if (util.isArray(newDoc)) {
-      preparedDoc = [];
-      newDoc.forEach(function(doc) {
-        preparedDoc.push(self.prepareDocumentForInsertion(doc));
-      });
+    if (Array.isArray(newDoc)) {
+      preparedDoc = newDoc.map(doc => this.prepareDocumentForInsertion(doc));
     } else {
       preparedDoc = model.deepCopy(newDoc);
       if (preparedDoc._id === undefined) {
         preparedDoc._id = this.createNewId();
       }
-      var now = new Date();
       if (this.timestampData && preparedDoc.createdAt === undefined) {
-        preparedDoc.createdAt = now;
-      }
-      if (this.timestampData && preparedDoc.updatedAt === undefined) {
-        preparedDoc.updatedAt = now;
+        preparedDoc.createdAt = new Date();
       }
       model.checkObject(preparedDoc);
     }
@@ -449,7 +452,7 @@ export default class Datastore extends EventEmitter {
    * @api private
    */
   _insertInCache(preparedDoc) {
-    if (util.isArray(preparedDoc)) {
+    if (Array.isArray(preparedDoc)) {
       this._insertMultipleDocsInCache(preparedDoc);
     } else {
       this.addToIndexes(preparedDoc);
@@ -483,24 +486,20 @@ export default class Datastore extends EventEmitter {
     }
   }
 
-  insert() {
-    this.executor.push({ this: this, fn: this._insert, arguments: arguments });
+  insert(...args: any[]) {
+    this.executor.push({ this: this, fn: this._insert, arguments: args });
   }
 
   /**
    * Count all documents matching the query
    * @param {Object} query MongoDB-style query
    */
-  count(query, callback) {
-    var cursor = new Cursor(this, query, function(err, docs, callback) {
-      if (err) {
-        return callback(err);
-      }
-      return callback(null, docs.length);
-    });
+  async count(query, callback) {
+    var cursor = new Cursor(this, query);
 
     if (typeof callback === "function") {
-      cursor.exec(callback);
+      const docs = await cursor.exec(callback);
+      return docs.length;
     } else {
       return cursor;
     }
@@ -508,44 +507,13 @@ export default class Datastore extends EventEmitter {
 
   /**
    * Find all documents matching the query
-   * If no callback is passed, we return the cursor so that user can limit, skip and finally exec
    * @param {Object} query MongoDB-style query
    * @param {Object} projection MongoDB-style projection
    */
-  find(query, projection, callback) {
-    switch (arguments.length) {
-      case 1:
-        projection = {};
-        // callback is undefined, will return a cursor
-        break;
-      case 2:
-        if (typeof projection === "function") {
-          callback = projection;
-          projection = {};
-        } // If not assume projection is an object and callback undefined
-        break;
-    }
-
-    var cursor = new Cursor(this, query, function(err, docs, callback) {
-      var res = [],
-        i;
-
-      if (err) {
-        return callback(err);
-      }
-
-      for (i = 0; i < docs.length; i += 1) {
-        res.push(model.deepCopy(docs[i]));
-      }
-      return callback(null, res);
-    });
-
+  find(query: any, projection = {}) {
+    const cursor = new Cursor(this, query);
     cursor.projection(projection);
-    if (typeof callback === "function") {
-      cursor.exec(callback);
-    } else {
-      return cursor;
-    }
+    return cursor;
   }
 
   /**
@@ -553,171 +521,104 @@ export default class Datastore extends EventEmitter {
    * @param {Object} query MongoDB-style query
    * @param {Object} projection MongoDB-style projection
    */
-  findOne(query, projection, callback) {
-    switch (arguments.length) {
-      case 1:
-        projection = {};
-        // callback is undefined, will return a cursor
-        break;
-      case 2:
-        if (typeof projection === "function") {
-          callback = projection;
-          projection = {};
-        } // If not assume projection is an object and callback undefined
-        break;
-    }
-
-    var cursor = new Cursor(this, query, function(err, docs, callback) {
-      if (err) {
-        return callback(err);
-      }
-      if (docs.length === 1) {
-        return callback(null, model.deepCopy(docs[0]));
-      } else {
-        return callback(null, null);
-      }
-    });
-
+  findOne(query, projection = {}) {
+    const cursor = new Cursor(this, query);
     cursor.projection(projection).limit(1);
-    if (typeof callback === "function") {
-      cursor.exec(callback);
-    } else {
-      return cursor;
-    }
+    return cursor;
   }
 
   /**
    * Update all docs matching query
    * @param {Object} query
    * @param {Object} updateQuery
-   * @param {Object} options Optional options
-   *                 options.multi If true, can update multiple documents (defaults to false)
-   *                 options.upsert If true, document is inserted if the query doesn't match anything
-   *                 options.returnUpdatedDocs Defaults to false, if true return as third argument the array of updated matched documents (even if no change actually took place)
-   * @param {Function} cb Optional callback, signature: (err, numAffected, affectedDocuments, upsert)
-   *                      If update was an upsert, upsert flag is set to true
-   *                      affectedDocuments can be one of the following:
-   *                        * For an upsert, the upserted document
-   *                        * For an update with returnUpdatedDocs option false, null
-   *                        * For an update with returnUpdatedDocs true and multi false, the updated document
-   *                        * For an update with returnUpdatedDocs true and multi true, the array of updated documents
-   *
-   * WARNING: The API was changed between v1.7.4 and v1.8, for consistency and readability reasons. Prior and including to v1.7.4,
-   *          the callback signature was (err, numAffected, updated) where updated was the updated document in case of an upsert
-   *          or the array of updated documents for an update if the returnUpdatedDocs option was true. That meant that the type of
-   *          affectedDocuments in a non multi update depended on whether there was an upsert or not, leaving only two ways for the
-   *          user to check whether an upsert had occured: checking the type of affectedDocuments or running another find query on
-   *          the whole dataset to check its size. Both options being ugly, the breaking change was necessary.
-   *
-   * @api private Use Datastore.update which has the same signature
    */
-  async _update(query, updateQuery, options, cb) {
-    var callback,
-      self = this,
-      numReplaced = 0,
-      multi,
-      upsert,
-      i;
+  async _update(query, updateQuery, options: UpdateOptions) {
+    await this._tryCreate(query, updateQuery, options.upsert || false);
+    return await this._tryUpdate(
+      query,
+      updateQuery,
+      options.multi || false,
+      options.returnUpdatedDocs || false,
+    );
+  }
 
-    if (typeof options === "function") {
-      cb = options;
-      options = {};
+  private async _tryCreate(query: any, updateQuery: any, upsert: boolean) {
+    // If upsert option is set, check whether we need to insert the doc
+    if (!upsert) return;
+
+    // Need to use an internal function not tied to the executor to avoid deadlock
+    const cursor = new Cursor(this, query);
+    const docs = await cursor.limit(1)._exec();
+    if (docs.length === 1) {
+      return;
     }
-    callback = cb || function() {};
-    multi = options.multi !== undefined ? options.multi : false;
-    upsert = options.upsert !== undefined ? options.upsert : false;
 
-    async.waterfall([
-      function(cb) {
-        // If upsert option is set, check whether we need to insert the doc
-        if (!upsert) {
-          return cb();
+    let toBeInserted;
+
+    try {
+      model.checkObject(updateQuery);
+      // updateQuery is a simple object with no modifier, use it as the document to insert
+      toBeInserted = updateQuery;
+    } catch (e) {
+      // updateQuery contains modifiers, use the find query as the base,
+      // strip it from all operators and update it according to updateQuery
+      try {
+        toBeInserted = model.modify(model.deepCopy(query, true), updateQuery);
+      } catch (err) {
+        throw err;
+      }
+
+      return await this._insert(toBeInserted);
+    }
+  }
+
+  private async _tryUpdate(
+    query: any,
+    updateQuery: any,
+    multi: boolean,
+    returnUpdatedDocs: boolean,
+  ) {
+    // Perform the update
+    var modifiedDoc,
+      modifications = [],
+      createdAt;
+
+    let numReplaced = 0;
+
+    const candidates = await this.getCandidates(query);
+
+    // Preparing update (if an error is thrown here neither the datafile nor
+    // the in-memory indexes are affected)
+    for (const item of candidates) {
+      if (model.match(item, query) && (multi || numReplaced === 0)) {
+        numReplaced += 1;
+        if (this.timestampData) {
+          createdAt = item.createdAt;
         }
-
-        // Need to use an internal function not tied to the executor to avoid deadlock
-        var cursor = new Cursor(self, query);
-        const docs = await cursor.limit(1)._exec();
-        if (docs.length === 1) {
-          return;
+        modifiedDoc = model.modify(item, updateQuery);
+        if (this.timestampData) {
+          modifiedDoc.createdAt = createdAt;
+          modifiedDoc.updatedAt = new Date();
         }
-
-        let toBeInserted;
-
-        try {
-          model.checkObject(updateQuery);
-          // updateQuery is a simple object with no modifier, use it as the document to insert
-          toBeInserted = updateQuery;
-        } catch (e) {
-          // updateQuery contains modifiers, use the find query as the base,
-          // strip it from all operators and update it according to updateQuery
-          try {
-            toBeInserted = model.modify(
-              model.deepCopy(query, true),
-              updateQuery,
-            );
-          } catch (err) {
-            throw err;
-          }
-
-          const newDoc = await this._insert(toBeInserted);
-          return callback(null, 1, newDoc, true);
-        }
-      },
-      function() {
-        // Perform the update
-        var modifiedDoc,
-          modifications = [],
-          createdAt;
-
-        self.getCandidates(query, function(err, candidates) {
-          if (err) {
-            return callback(err);
-          }
-
-          // Preparing update (if an error is thrown here neither the datafile nor
-          // the in-memory indexes are affected)
-          for (i = 0; i < candidates.length; i += 1) {
-            if (
-              model.match(candidates[i], query) &&
-              (multi || numReplaced === 0)
-            ) {
-              numReplaced += 1;
-              if (self.timestampData) {
-                createdAt = candidates[i].createdAt;
-              }
-              modifiedDoc = model.modify(candidates[i], updateQuery);
-              if (self.timestampData) {
-                modifiedDoc.createdAt = createdAt;
-                modifiedDoc.updatedAt = new Date();
-              }
-              modifications.push({
-                oldDoc: candidates[i],
-                newDoc: modifiedDoc,
-              });
-            }
-          }
-
-          // Change the docs in memory
-          this.updateIndexes(modifications);
-
-          // Update the datafile
-          var updatedDocs = _.pluck(modifications, "newDoc");
-          await this.persistence.persistNewState(updatedDocs);
-          if (!options.returnUpdatedDocs) {
-            return numReplaced;
-          } else {
-            var updatedDocsDC = [];
-            updatedDocs.forEach(doc => {
-              updatedDocsDC.push(model.deepCopy(doc));
-            });
-            if (!multi) {
-              updatedDocsDC = updatedDocsDC[0];
-            }
-            return callback(null, numReplaced, updatedDocsDC);
-          }
+        modifications.push({
+          oldDoc: item,
+          newDoc: modifiedDoc,
         });
-      },
-    ]);
+      }
+    }
+
+    // Change the docs in memory
+    this.updateIndexes(modifications);
+
+    // Update the datafile
+    const updatedDocs = _.pluck(modifications, "newDoc");
+    await this.persistence.persistNewState(updatedDocs);
+    if (!returnUpdatedDocs) {
+      return numReplaced;
+    } else {
+      let updatedDocsDC = updatedDocs.map(doc => model.deepCopy(doc));
+      return !multi ? updatedDocsDC[0] : updatedDocsDC;
+    }
   }
 
   update() {
@@ -732,13 +633,9 @@ export default class Datastore extends EventEmitter {
    *                 options.multi If true, can update multiple documents (defaults to false)
    */
   async _remove(query, options: { multi?: boolean } = {}) {
-    var callback,
-      self = this,
-      numRemoved = 0,
-      removedDocs = [],
-      multi;
-
-    multi = options.multi !== undefined ? options.multi : false;
+    let numRemoved = 0;
+    const removedDocs = [];
+    const multi = options.multi || false;
 
     const candidates = await this.getCandidates(query, true);
 
@@ -754,7 +651,7 @@ export default class Datastore extends EventEmitter {
     return numRemoved;
   }
 
-  remove() {
+  remove(...args: any[]) {
     this.executor.push({ this: this, fn: this._remove, arguments: arguments });
   }
 }

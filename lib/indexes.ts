@@ -1,7 +1,6 @@
-var BinarySearchTree = require("ya").AVLTree,
-  model = require("./model"),
-  _ = require("underscore"),
-  util = require("util");
+import * as model from "./model";
+import { unique } from "./util";
+var BinarySearchTree = require("ya").AVLTree;
 
 /**
  * Two indexed pointers are equal iif they point to the same place
@@ -26,7 +25,7 @@ function projectForUnique(elt) {
   if (typeof elt === "number") {
     return "$number" + elt;
   }
-  if (util.isArray(elt)) {
+  if (Array.isArray(elt)) {
     return "$date" + elt.getTime();
   }
 
@@ -61,7 +60,7 @@ export default class Index {
     this.treeOptions = {
       unique: this.unique,
       compareKeys: model.compareThings,
-      checkValueEquality: checkValueEquality,
+      checkValueEquality,
     };
 
     this.reset(); // No data in the beginning
@@ -93,7 +92,7 @@ export default class Index {
       failingI,
       error;
 
-    if (util.isArray(doc)) {
+    if (Array.isArray(doc)) {
       this.insertMultipleDocs(doc);
       return;
     }
@@ -105,7 +104,7 @@ export default class Index {
       return;
     }
 
-    if (!util.isArray(key)) {
+    if (!Array.isArray(key)) {
       this.tree.insert(key, doc);
     } else {
       // If an insert fails due to a unique constraint, roll back all inserts before it
@@ -166,27 +165,21 @@ export default class Index {
    * O(log(n))
    */
   remove(doc) {
-    var key,
-      self = this;
-
-    if (util.isArray(doc)) {
-      doc.forEach(function(d) {
-        self.remove(d);
-      });
+    if (Array.isArray(doc)) {
+      doc.forEach(d => this.remove(d));
       return;
     }
 
-    key = model.getDotValue(doc, this.fieldName);
-
+    const key = model.getDotValue(doc, this.fieldName);
     if (key === undefined && this.sparse) {
       return;
     }
 
-    if (!util.isArray(key)) {
+    if (!Array.isArray(key)) {
       this.tree.delete(key, doc);
     } else {
-      _.uniq(key, projectForUnique).forEach(function(_key) {
-        self.tree.delete(_key, doc);
+      _.uniq(key, projectForUnique).forEach(_key => {
+        this.tree.delete(_key, doc);
       });
     }
   }
@@ -196,8 +189,8 @@ export default class Index {
    * If a constraint is violated, changes are rolled back and an error thrown
    * Naive implementation, still in O(log(n))
    */
-  update(oldDoc, newDoc) {
-    if (util.isArray(oldDoc)) {
+  update(oldDoc: any | any[], newDoc?: any) {
+    if (Array.isArray(oldDoc)) {
       this.updateMultipleDocs(oldDoc);
       return;
     }
@@ -257,10 +250,10 @@ export default class Index {
   revertUpdate(oldDoc, newDoc) {
     var revert = [];
 
-    if (!util.isArray(oldDoc)) {
+    if (!Array.isArray(oldDoc)) {
       this.update(newDoc, oldDoc);
     } else {
-      oldDoc.forEach(function(pair) {
+      oldDoc.forEach(pair => {
         revert.push({ oldDoc: pair.newDoc, newDoc: pair.oldDoc });
       });
       this.update(revert);
@@ -273,25 +266,18 @@ export default class Index {
    * @return {Array of documents}
    */
   getMatching(value) {
-    var self = this;
-
-    if (!util.isArray(value)) {
-      return self.tree.search(value);
+    if (!Array.isArray(value)) {
+      return this.tree.search(value);
     } else {
-      var _res = {},
-        res = [];
+      const _res = {};
 
-      value.forEach(function(v) {
-        self.getMatching(v).forEach(function(doc) {
+      value.forEach(v => {
+        this.getMatching(v).forEach(doc => {
           _res[doc._id] = doc;
         });
       });
 
-      Object.keys(_res).forEach(function(_id) {
-        res.push(_res[_id]);
-      });
-
-      return res;
+      return Object.keys(_res).map(_id => _res[_id]);
     }
   }
 
@@ -310,16 +296,10 @@ export default class Index {
    * @return {Array of documents}
    */
   getAll() {
-    var res = [];
-
-    this.tree.executeOnEveryNode(function(node) {
-      var i;
-
-      for (i = 0; i < node.data.length; i += 1) {
-        res.push(node.data[i]);
-      }
+    let res = [];
+    this.tree.executeOnEveryNode(node => {
+      res = [...res, node.data];
     });
-
     return res;
   }
 }

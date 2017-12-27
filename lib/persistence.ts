@@ -1,6 +1,9 @@
 import * as path from "path";
 import Datastore from "./datastore";
 import * as storage from "./storage";
+import * as model from "./model";
+import Index from "./indexes";
+import { uid } from "./util";
 
 /**
  * Handle every persistence-related task
@@ -9,10 +12,7 @@ import * as storage from "./storage";
  * * Persistence.persistNewState(newDocs, callback) where newDocs is an array of documents and callback has signature err
  */
 
-var model = require("./model"),
-  async = require("async"),
-  customUtils = require("./customUtils"),
-  Index = require("./indexes");
+var async = require("async");
 
 export interface PersistenceOptions {
   db: Datastore;
@@ -81,7 +81,7 @@ export default class Persistence {
       };
     for (i = 1; i < 30; i += 1) {
       for (j = 0; j < 10; j += 1) {
-        randomString = customUtils.uid(i);
+        randomString = uid(i);
         if (
           this.beforeDeserialization(this.afterSerialization(randomString)) !==
           randomString
