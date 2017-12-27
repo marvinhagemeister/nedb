@@ -2,6 +2,7 @@
  * Manage access to data, be it to find, update or remove it
  */
 import * as model from "./model";
+import Datastore from ".";
 
 /** Create a new cursor for this collection */
 export default class Cursor {
@@ -10,7 +11,7 @@ export default class Cursor {
   private _sort: any;
   private _projection: Record<string, any>;
 
-  constructor(private db, private query = {}) {}
+  constructor(private db: Datastore, private query = {}) {}
 
   /** Set a limit to the number of results */
   limit(limit: number) {
@@ -19,7 +20,7 @@ export default class Cursor {
   }
 
   /** Skip a the number of results */
-  skip(skip) {
+  skip(skip: number) {
     this._skip = skip;
     return this;
   }
@@ -35,20 +36,21 @@ export default class Cursor {
 
   /**
    * Add the use of a projection
-   * @param {Object} projection - MongoDB-style projection. {} means take all fields. Then it's { key1: 1, key2: 1 } to take only key1 and key2
-   *                              { key1: 0, key2: 0 } to omit only key1 and key2. Except _id, you can't mix takes and omits
+   * @param {Object} projection - MongoDB-style projection. {} means take all
+   * fields. Then it's { key1: 1, key2: 1 } to take only key1 and key2
+   * { key1: 0, key2: 0 } to omit only key1 and key2. Except _id, you can't mix
+   * takes and omits
    */
-  projection(projection: Record<string, any>) {
+  projection(projection: Record<string, number>) {
     this._projection = projection;
     return this;
   }
 
   /** Apply the projection */
   project(candidates) {
-    var res = [],
-      keepId,
-      action,
-      keys;
+    const res = [];
+    let action: number;
+    let keys;
 
     if (
       this._projection === undefined ||
@@ -57,7 +59,7 @@ export default class Cursor {
       return candidates;
     }
 
-    keepId = this._projection._id !== 0;
+    const keepId = this._projection._id !== 0;
     delete this._projection._id;
 
     // Check for consistency
@@ -70,8 +72,8 @@ export default class Cursor {
     });
 
     // Do the actual projection
-    candidates.forEach(candidate => {
-      var toPush;
+    return candidates.map(candidate => {
+      let toPush;
       if (action === 1) {
         // pick-type projection
         toPush = { $set: {} };
@@ -90,15 +92,15 @@ export default class Cursor {
         });
         toPush = model.modify(candidate, toPush);
       }
+
       if (keepId) {
         toPush._id = candidate._id;
       } else {
         delete toPush._id;
       }
-      res.push(toPush);
-    });
 
-    return res;
+      return toPush;
+    });
   }
 
   /**
@@ -141,7 +143,7 @@ export default class Cursor {
       keys = Object.keys(this._sort);
 
       // Sorting
-      var criteria = [];
+      var criteria: any[] = [];
       for (i = 0; i < keys.length; i++) {
         key = keys[i];
         criteria.push({ key: key, direction: this._sort[key] });
@@ -175,7 +177,7 @@ export default class Cursor {
     return this.project(res);
   }
 
-  exec(...args: any[]) {
+  async exec(...args: any[]) {
     this.db.executor.push({
       this: this,
       fn: this._exec,

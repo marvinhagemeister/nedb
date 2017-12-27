@@ -32,12 +32,6 @@ export interface DataStoreOptions {
   timestampData?: boolean;
   /** Defaults to false */
   inMemoryOnly?: boolean;
-  /**
-   * Specify the name of your NW app if you want options. filename to
-   * be relative to the directory where Node Webkit stores application data such
-   * as cookies and local storage (the best place to store data in my opinion)
-   */
-  nodeWebkitAppName?: string;
   /** Defaults to false */
   autoload?: boolean;
   /**
@@ -111,7 +105,6 @@ export default class Datastore extends EventEmitter {
     // Persistence handling
     this.persistence = new Persistence({
       db: this,
-      nodeWebkitAppName: options.nodeWebkitAppName,
       afterSerialization: options.afterSerialization,
       beforeDeserialization: options.beforeDeserialization,
       corruptAlertThreshold: options.corruptAlertThreshold,
@@ -228,10 +221,8 @@ export default class Datastore extends EventEmitter {
    * Remove one or several document(s) from all indexes
    */
   removeFromIndexes(doc) {
-    var self = this;
-
-    Object.keys(this.indexes).forEach(function(i) {
-      self.indexes[i].remove(doc);
+    Object.keys(this.indexes).forEach(i => {
+      this.indexes[i].remove(doc);
     });
   }
 
@@ -240,7 +231,7 @@ export default class Datastore extends EventEmitter {
    * To update multiple documents, oldDoc must be an array of { oldDoc, newDoc } pairs
    * If one update violates a constraint, all changes are rolled back
    */
-  updateIndexes(oldDoc, newDoc?: any) {
+  updateIndexes(oldDoc: any | any[], newDoc?: any) {
     var i,
       failingIndex,
       error,
@@ -494,15 +485,9 @@ export default class Datastore extends EventEmitter {
    * Count all documents matching the query
    * @param {Object} query MongoDB-style query
    */
-  async count(query, callback) {
-    var cursor = new Cursor(this, query);
-
-    if (typeof callback === "function") {
-      const docs = await cursor.exec(callback);
-      return docs.length;
-    } else {
-      return cursor;
-    }
+  async count(query: any): Promise<number> {
+    const docs = await new Cursor(this, query).exec();
+    return docs.length;
   }
 
   /**
@@ -510,10 +495,8 @@ export default class Datastore extends EventEmitter {
    * @param {Object} query MongoDB-style query
    * @param {Object} projection MongoDB-style projection
    */
-  find(query: any, projection = {}) {
-    const cursor = new Cursor(this, query);
-    cursor.projection(projection);
-    return cursor;
+  async find(query: any, projection = {}) {
+    return new Cursor(this, query).projection(projection).exec();
   }
 
   /**
@@ -521,10 +504,8 @@ export default class Datastore extends EventEmitter {
    * @param {Object} query MongoDB-style query
    * @param {Object} projection MongoDB-style projection
    */
-  findOne(query, projection = {}) {
-    const cursor = new Cursor(this, query);
-    cursor.projection(projection).limit(1);
-    return cursor;
+  async findOne(query, projection = {}) {
+    return new Cursor(this, query).projection(projection).limit(1);
   }
 
   /**

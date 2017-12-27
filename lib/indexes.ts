@@ -12,7 +12,7 @@ function checkValueEquality(a, b) {
 /**
  * Type-aware projection
  */
-function projectForUnique(elt) {
+function projectForUnique(elt: any) {
   if (elt === null) {
     return "$null";
   }

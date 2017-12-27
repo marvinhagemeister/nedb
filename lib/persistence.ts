@@ -12,20 +12,14 @@ import { uid } from "./util";
  * * Persistence.persistNewState(newDocs, callback) where newDocs is an array of documents and callback has signature err
  */
 
-var async = require("async");
-
 export interface PersistenceOptions {
   db: Datastore;
-  /**
-   * specify the name of your NW app if you want options.filename to be relative
-   * to the directory where Node Webkit stores application data such as cookies
-   * and local storage (the best place to store data in my opinion)
-   */
-  nodeWebkitAppName?: string;
   corruptAlertThreshold?: number;
   beforeDeserialization?: Function;
   afterSerialization?: Function;
 }
+
+const noop = (x: any) => x;
 
 /** Create a new Persistence object for database options.db */
 export default class Persistence {
@@ -35,14 +29,14 @@ export default class Persistence {
   private corruptAlertThreshold: number;
   private beforeDeserialization: Function;
   private afterSerialization: Function;
-  private autocompactionIntervalId: NodeJS.Timer;
+  private autocompactionIntervalId: any;
 
   constructor(options: PersistenceOptions) {
     var i, j, randomString;
 
     this.db = options.db;
     this.inMemoryOnly = this.db.inMemoryOnly;
-    this.filename = this.db.filename;
+    this.filename = this.db.filename || "default";
     this.corruptAlertThreshold =
       options.corruptAlertThreshold !== undefined
         ? options.corruptAlertThreshold
@@ -69,16 +63,9 @@ export default class Persistence {
         "Serialization hook undefined but deserialization hook defined, cautiously refusing to start NeDB to prevent dataloss",
       );
     }
-    this.afterSerialization =
-      options.afterSerialization ||
-      function(s) {
-        return s;
-      };
-    this.beforeDeserialization =
-      options.beforeDeserialization ||
-      function(s) {
-        return s;
-      };
+    this.afterSerialization = options.afterSerialization || noop;
+    this.beforeDeserialization = options.beforeDeserialization || noop;
+
     for (i = 1; i < 30; i += 1) {
       for (j = 0; j < 10; j += 1) {
         randomString = uid(i);
@@ -91,27 +78,6 @@ export default class Persistence {
           );
         }
       }
-    }
-
-    // For NW apps, store data in the same directory where NW stores application data
-    if (this.filename && options.nodeWebkitAppName) {
-      console.log(
-        "==================================================================",
-      );
-      console.log("WARNING: The nodeWebkitAppName option is deprecated");
-      console.log(
-        "To get the path to the directory where Node Webkit stores the data",
-      );
-      console.log("for your app, use the internal nw.gui module like this");
-      console.log("require('nw.gui').App.dataPath");
-      console.log("See https://github.com/rogerwang/node-webkit/issues/500");
-      console.log(
-        "==================================================================",
-      );
-      this.filename = getNWAppFilename(
-        options.nodeWebkitAppName,
-        this.filename,
-      );
     }
   }
 
@@ -152,9 +118,7 @@ export default class Persistence {
     this.db.emit("compaction.done");
   }
 
-  /**
-   * Queue a rewrite of the datafile
-   */
+  /** Queue a rewrite of the datafile */
   compactDatafile() {
     this.db.executor.push({
       this: this,
@@ -165,11 +129,11 @@ export default class Persistence {
 
   /**
    * Set automatic compaction every interval ms
-   * @param {Number} interval in milliseconds, with an enforced minimum of 5 seconds
+   * @param {Number} ms in milliseconds, with an enforced minimum of 5 seconds
    */
-  setAutocompactionInterval(interval) {
+  setAutocompactionInterval(ms: number) {
     const minInterval = 5000,
-      realInterval = Math.max(interval || 0, minInterval);
+      realInterval = Math.max(ms || 0, minInterval);
 
     this.stopAutocompaction();
 
@@ -179,9 +143,7 @@ export default class Persistence {
     );
   }
 
-  /**
-   * Stop autocompaction (do nothing if autocompaction was not running)
-   */
+  /** Stop autocompaction (do nothing if autocompaction was not running) */
   stopAutocompaction() {
     if (this.autocompactionIntervalId) {
       clearInterval(this.autocompactionIntervalId);
@@ -194,20 +156,16 @@ export default class Persistence {
    * @param {Array} newDocs Can be empty if no doc was updated/removed
    */
   async persistNewState(newDocs) {
-    let toPersist = "";
-
     // In-memory only datastore
-    if (this.inMemoryOnly) {
-      return;
-    }
+    if (this.inMemoryOnly) return;
 
-    newDocs.forEach(function(doc) {
-      toPersist += this.afterSerialization(model.serialize(doc)) + "\n";
-    });
+    const toPersist = newDocs
+      .map(doc => {
+        this.afterSerialization(model.serialize(doc)) + "\n";
+      })
+      .join("");
 
-    if (toPersist.length === 0) {
-      return;
-    }
+    if (toPersist.length === 0) return;
 
     return storage.appendFile(this.filename, toPersist, "utf8");
   }
@@ -216,19 +174,16 @@ export default class Persistence {
    * From a database's raw data, return the corresponding
    * machine understandable collection
    */
-  treatRawData(rawData) {
-    var data = rawData.split("\n"),
-      dataById = {},
-      tdata = [],
-      i,
-      indexes = {},
-      corruptItems = -1; // Last line of every data file is usually blank so not really corrupt
+  treatRawData(rawData: string) {
+    const data = rawData.split("\n");
+    const dataById: Record<string, any> = {};
+    const indexes: Record<string, any> = {};
+    // Last line of every data file is usually blank so not really corrupt
+    let corruptItems = -1;
 
-    for (i = 0; i < data.length; i += 1) {
-      var doc;
-
+    for (const item of data) {
       try {
-        doc = model.deserialize(this.beforeDeserialization(data[i]));
+        const doc = model.deserialize(this.beforeDeserialization(item));
         if (doc._id) {
           if (doc.$$deleted === true) {
             delete dataById[doc._id];
@@ -260,10 +215,7 @@ export default class Persistence {
       );
     }
 
-    Object.keys(dataById).forEach(k => {
-      tdata.push(dataById[k]);
-    });
-
+    const tdata = Object.keys(dataById).map(k => dataById[k]);
     return { data: tdata, indexes: indexes };
   }
 
@@ -323,7 +275,7 @@ export function ensureDirectoryExists(dir: string) {
  * directory where Node Webkit stores data for this application. Probably the
  * best place to store data
  */
-export function getNWAppFilename(appName, relativeFilename) {
+export function getNWAppFilename(appName: string, relativeFilename: string) {
   let home;
 
   switch (process.platform) {

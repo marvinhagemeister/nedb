@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import * as crypto from "crypto";
 
 /**
  * Return a random alphanumerical string of length len
@@ -8,7 +8,7 @@ import crypto from "crypto";
  * The probability of a collision is extremely small (need 3*10^12 documents to have one chance in a million of a collision)
  * See http://en.wikipedia.org/wiki/Birthday_problem
  */
-export function uid(len) {
+export function uid(len: number) {
   return crypto
     .randomBytes(Math.ceil(Math.max(8, len * 2)))
     .toString("base64")
@@ -16,6 +16,6 @@ export function uid(len) {
     .slice(0, len);
 }
 
-export function unique(array: any[]) {
-  return [...new Set(array)];
+export function unique(arr: any[]) {
+  return [...new Set(arr)];
 }

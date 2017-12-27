@@ -1,15 +1,13 @@
+import { exists } from "nicer-fs";
+import { promisify } from "util";
+import * as fs from "fs";
+import * as path from "path";
 import Datastore from "../datastore";
 import Cursor from "../Cursor";
+import * as model from "../model";
+import { ensureDirectoryExists } from "../persistence";
 
-var should = require("chai").should(),
-  assert = require("chai").assert,
-  testDb = "workspace/test.db",
-  fs = require("fs"),
-  path = require("path"),
-  _ = require("underscore"),
-  async = require("async"),
-  model = require("../lib/model"),
-  Persistence = require("../lib/persistence");
+const testDb = "workspace/test.db";
 
 describe("Cursor", () => {
   let d: Datastore;
@@ -19,29 +17,11 @@ describe("Cursor", () => {
     expect(d.filename).toEqual(testDb);
     expect(d.inMemoryOnly).toEqual(false);
 
-    async.waterfall(
-      [
-        function(cb) {
-          Persistence.ensureDirectoryExists(path.dirname(testDb), function() {
-            fs.exists(testDb, function(exists) {
-              if (exists) {
-                fs.unlink(testDb, cb);
-              } else {
-                return cb();
-              }
-            });
-          });
-        },
-        function(cb) {
-          d.loadDatabase(function(err) {
-            assert.isNull(err);
-            d.getAllData().length.should.equal(0);
-            return cb();
-          });
-        },
-      ],
-      done,
-    );
+    await ensureDirectoryExists(path.dirname(testDb));
+    const res = await exists(testDb);
+    if (res) await promisify(fs.unlink)(testDb);
+    await d.loadDatabase();
+    expect(d.getAllData().length).toEqual(0);
   });
 
   describe("Without sorting", () => {
@@ -54,8 +34,7 @@ describe("Cursor", () => {
     });
 
     it("Without query, an empty query or a simple query and no skip or limit", async () => {
-      let cursor = new Cursor(d);
-      let docs = await cursor.exec();
+      let docs = await new Cursor(d).exec();
       expect(docs.length).toEqual(5);
 
       expect(docs.filter(doc => doc.age === 5)[0].age).toEqual(5);
@@ -64,8 +43,7 @@ describe("Cursor", () => {
       expect(docs.filter(doc => doc.age === 23)[0].age).toEqual(23);
       expect(docs.filter(doc => doc.age === 89)[0].age).toEqual(89);
 
-      cursor = new Cursor(d, { age: { $gt: 23 } });
-      docs = await cursor.exec();
+      docs = await new Cursor(d, { age: { $gt: 23 } }).exec();
       expect(docs.length).toEqual(3);
       expect(docs.filter(doc => doc.age === 57)[0].age).toEqual(57);
       expect(docs.filter(doc => doc.age === 52)[0].age).toEqual(52);
@@ -79,21 +57,17 @@ describe("Cursor", () => {
     });
 
     it("With a limit", async () => {
-      var cursor = new Cursor(d);
-      cursor.limit(3);
-      const docs = await cursor.exec();
+      const docs = await new Cursor(d).limit(3).exec();
       expect(docs.length).toEqual(3);
     });
 
     it("With a skip", async () => {
-      var cursor = new Cursor(d);
-      const docs = await cursor.skip(2).exec();
+      const docs = await new Cursor(d).skip(2).exec();
       expect(docs.length).toEqual(3);
     });
 
     it("With a limit and a skip and method chaining", async () => {
-      var cursor = new Cursor(d);
-      const docs = await cursor.limit(4).skip(3);
+      const docs = await new Cursor(d).limit(4).skip(3);
       // Only way to know that the right number of results was skipped is if
       // limit + skip > number of results
       expect(docs.length).toEqual(2);
@@ -159,7 +133,7 @@ describe("Cursor", () => {
 
     it("With an empty collection", async () => {
       await d.remove({}, { multi: true });
-      var cursor = new Cursor(d).sort({ age: 1 });
+      docs = await new Cursor(d).sort({ age: 1 });
       const docs = await cursor.exec();
 
       expect(docs.length).toEqual(0);
@@ -205,617 +179,288 @@ describe("Cursor", () => {
     });
 
     it("Using limit and skip with sort", async () => {
-      var i;
-      async.waterfall(
-        [
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .limit(1)
-              .skip(2)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(1);
-                docs[0].age.should.equal(52);
-                cb();
-              });
-          },
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .limit(3)
-              .skip(1)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(3);
-                docs[0].age.should.equal(23);
-                docs[1].age.should.equal(52);
-                docs[2].age.should.equal(57);
-                cb();
-              });
-          },
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: -1 })
-              .limit(2)
-              .skip(2)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(2);
-                docs[0].age.should.equal(52);
-                docs[1].age.should.equal(23);
-                cb();
-              });
-          },
-        ],
-        done,
-      );
+      let docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .limit(1)
+        .skip(2)
+        .exec();
+      expect(docs.length).toEqual(1);
+      expect(docs[0].age).toEqual(52);
+
+      docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .limit(3)
+        .skip(1)
+        .exec();
+      expect(docs.map(x => x.age)).toEqual([23, 52, 57]);
+
+      docs = await new Cursor(d)
+        .sort({ age: -1 })
+        .limit(2)
+        .skip(2)
+        .exec();
+      expect(docs.map(x => x.age)).toEqual([52, 23]);
     });
 
     it("Using too big a limit and a skip with sort", async () => {
-      var i;
-      async.waterfall(
-        [
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .limit(8)
-              .skip(2)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(3);
-                docs[0].age.should.equal(52);
-                docs[1].age.should.equal(57);
-                docs[2].age.should.equal(89);
-                cb();
-              });
-          },
-        ],
-        done,
-      );
+      const docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .limit(8)
+        .skip(2)
+        .exec();
+      expect(docs).toEqual([52, 57, 89]);
     });
 
     it("Using too big a skip with sort should return no result", async () => {
-      var i;
-      async.waterfall(
-        [
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .skip(5)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(0);
-                cb();
-              });
-          },
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .skip(7)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(0);
-                cb();
-              });
-          },
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .limit(3)
-              .skip(7)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(0);
-                cb();
-              });
-          },
-          function(cb) {
-            var cursor = new Cursor(d);
-            cursor
-              .sort({ age: 1 })
-              .limit(6)
-              .skip(7)
-              .exec(function(err, docs) {
-                assert.isNull(err);
-                docs.length.should.equal(0);
-                cb();
-              });
-          },
-        ],
-        done,
-      );
+      let docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .skip(5)
+        .exec();
+      expect(docs).toEqual([]);
+
+      docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .skip(7)
+        .exec();
+      expect(docs).toEqual([]);
+
+      docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .limit(3)
+        .skip(7)
+        .exec();
+      expect(docs).toEqual([]);
+
+      docs = await new Cursor(d)
+        .sort({ age: 1 })
+        .limit(6)
+        .skip(7)
+        .exec();
+      expect(docs).toEqual([]);
     });
 
     it("Sorting strings", async () => {
-      async.waterfall(
-        [
-          function(cb) {
-            d.remove({}, { multi: true }, function(err) {
-              if (err) {
-                return cb(err);
-              }
+      await d.remove({}, { multi: true });
+      await d.insert({ name: "jako" });
+      await d.insert({ name: "jakeb" });
+      await d.insert({ name: "sue" });
 
-              d.insert({ name: "jako" }, function() {
-                d.insert({ name: "jakeb" }, function() {
-                  d.insert({ name: "sue" }, function() {
-                    return cb();
-                  });
-                });
-              });
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ name: 1 }).exec(function(err, docs) {
-              docs.length.should.equal(3);
-              docs[0].name.should.equal("jakeb");
-              docs[1].name.should.equal("jako");
-              docs[2].name.should.equal("sue");
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ name: -1 }).exec(function(err, docs) {
-              docs.length.should.equal(3);
-              docs[0].name.should.equal("sue");
-              docs[1].name.should.equal("jako");
-              docs[2].name.should.equal("jakeb");
-              return cb();
-            });
-          },
-        ],
-        done,
-      );
+      let docs = await new Cursor(d, {}).sort({ name: 1 }).exec();
+      expect(docs.map(x => x.name)).toEqual(["jakeb", "jako", "sue"]);
+
+      docs = await new Cursor(d, {}).sort({ name: -1 }).exec();
+      expect(docs.map(x => x.name)).toEqual(["sue", "jako", "jakeb"]);
     });
 
     it("Sorting nested fields with dates", async () => {
-      var doc1, doc2, doc3;
+      await d.remove({}, { multi: true });
+      const doc1 = await d.insert({ event: { recorded: new Date(400) } });
+      const doc2 = await d.insert({
+        event: { recorded: new Date(60000) },
+      });
+      const doc3 = await d.insert({ event: { recorded: new Date(32) } });
 
-      async.waterfall(
-        [
-          function(cb) {
-            d.remove({}, { multi: true }, function(err) {
-              if (err) {
-                return cb(err);
-              }
+      let docs = await new Cursor(d, {}).sort({ "event.recorded": 1 }).exec();
+      expect(docs.map(x => x._id)).toEqual([doc3._id, doc1._id, doc2._id]);
 
-              d.insert({ event: { recorded: new Date(400) } }, function(
-                err,
-                _doc1,
-              ) {
-                doc1 = _doc1;
-                d.insert({ event: { recorded: new Date(60000) } }, function(
-                  err,
-                  _doc2,
-                ) {
-                  doc2 = _doc2;
-                  d.insert({ event: { recorded: new Date(32) } }, function(
-                    err,
-                    _doc3,
-                  ) {
-                    doc3 = _doc3;
-                    return cb();
-                  });
-                });
-              });
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ "event.recorded": 1 }).exec(function(err, docs) {
-              docs.length.should.equal(3);
-              docs[0]._id.should.equal(doc3._id);
-              docs[1]._id.should.equal(doc1._id);
-              docs[2]._id.should.equal(doc2._id);
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ "event.recorded": -1 }).exec(function(err, docs) {
-              docs.length.should.equal(3);
-              docs[0]._id.should.equal(doc2._id);
-              docs[1]._id.should.equal(doc1._id);
-              docs[2]._id.should.equal(doc3._id);
-              return cb();
-            });
-          },
-        ],
-        done,
-      );
+      docs = await new Cursor(d, {}).sort({ "event.recorded": -1 }).exec();
+      expect(docs.map(x => x._id)).toEqual([doc2._id, doc1._id, doc3._id]);
     });
 
     it("Sorting when some fields are undefined", async () => {
-      async.waterfall(
-        [
-          function(cb) {
-            d.remove({}, { multi: true }, function(err) {
-              if (err) {
-                return cb(err);
-              }
+      await d.remove({}, { multi: true });
+      await d.insert({ name: "jako", other: 2 });
+      await d.insert({ name: "jakeb", other: 3 });
+      await d.insert({ name: "sue" });
+      await d.insert({ name: "henry", other: 4 });
 
-              d.insert({ name: "jako", other: 2 }, function() {
-                d.insert({ name: "jakeb", other: 3 }, function() {
-                  d.insert({ name: "sue" }, function() {
-                    d.insert({ name: "henry", other: 4 }, function() {
-                      return cb();
-                    });
-                  });
-                });
-              });
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ other: 1 }).exec(function(err, docs) {
-              docs.length.should.equal(4);
-              docs[0].name.should.equal("sue");
-              assert.isUndefined(docs[0].other);
-              docs[1].name.should.equal("jako");
-              docs[1].other.should.equal(2);
-              docs[2].name.should.equal("jakeb");
-              docs[2].other.should.equal(3);
-              docs[3].name.should.equal("henry");
-              docs[3].other.should.equal(4);
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {
-              name: { $in: ["suzy", "jakeb", "jako"] },
-            });
-            cursor.sort({ other: -1 }).exec(function(err, docs) {
-              docs.length.should.equal(2);
-              docs[0].name.should.equal("jakeb");
-              docs[0].other.should.equal(3);
-              docs[1].name.should.equal("jako");
-              docs[1].other.should.equal(2);
-              return cb();
-            });
-          },
-        ],
-        done,
-      );
+      let docs = await new Cursor(d, {}).sort({ other: 1 }).exec();
+      expect(docs).toEqual([
+        { name: "sue", other: undefined },
+        { name: "jako", other: 2 },
+        { name: "jakeb", other: 3 },
+        { name: "henry", other: 4 },
+      ]);
+
+      docs = await new Cursor(d, {
+        name: { $in: ["suzy", "jakeb", "jako"] },
+      })
+        .sort({ other: -1 })
+        .exec();
+      expect(docs).toEqual([
+        { name: "jakeb", other: 3 },
+        { name: "jako", other: 2 },
+      ]);
     });
 
     it("Sorting when all fields are undefined", async () => {
-      async.waterfall(
-        [
-          function(cb) {
-            d.remove({}, { multi: true }, function(err) {
-              if (err) {
-                return cb(err);
-              }
+      await d.remove({}, { multi: true });
+      await d.insert({ name: "jako" });
+      await d.insert({ name: "jakeb" });
+      await d.insert({ name: "sue" });
 
-              d.insert({ name: "jako" }, function() {
-                d.insert({ name: "jakeb" }, function() {
-                  d.insert({ name: "sue" }, function() {
-                    return cb();
-                  });
-                });
-              });
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ other: 1 }).exec(function(err, docs) {
-              docs.length.should.equal(3);
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {
-              name: { $in: ["sue", "jakeb", "jakob"] },
-            });
-            cursor.sort({ other: -1 }).exec(function(err, docs) {
-              docs.length.should.equal(2);
-              return cb();
-            });
-          },
-        ],
-        done,
-      );
+      let docs = await new Cursor(d, {}).sort({ other: 1 }).exec();
+      expect(docs.length).toEqual(3);
+
+      docs = await new Cursor(d, {
+        name: { $in: ["sue", "jakeb", "jakob"] },
+      })
+        .sort({ other: -1 })
+        .exec();
+      expect(docs.length).toEqual(2);
     });
 
     it("Multiple consecutive sorts", async () => {
-      async.waterfall(
-        [
-          function(cb) {
-            d.remove({}, { multi: true }, function(err) {
-              if (err) {
-                return cb(err);
-              }
+      await d.remove({}, { multi: true });
+      await d.insert({ name: "jako", age: 43, nid: 1 });
+      await d.insert({ name: "jakeb", age: 43, nid: 2 });
+      await d.insert({ name: "sue", age: 12, nid: 3 });
+      await d.insert({ name: "zoe", age: 23, nid: 4 });
+      await d.insert({ name: "jako", age: 35, nid: 5 });
 
-              d.insert({ name: "jako", age: 43, nid: 1 }, function() {
-                d.insert({ name: "jakeb", age: 43, nid: 2 }, function() {
-                  d.insert({ name: "sue", age: 12, nid: 3 }, function() {
-                    d.insert({ name: "zoe", age: 23, nid: 4 }, function() {
-                      d.insert({ name: "jako", age: 35, nid: 5 }, function() {
-                        return cb();
-                      });
-                    });
-                  });
-                });
-              });
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ name: 1, age: -1 }).exec(function(err, docs) {
-              docs.length.should.equal(5);
+      let docs = await new Cursor(d, {}).sort({ name: 1, age: -1 }).exec();
+      expect(docs.map(doc => doc.nid)).toEqual([2, 1, 5, 3, 4]);
 
-              docs[0].nid.should.equal(2);
-              docs[1].nid.should.equal(1);
-              docs[2].nid.should.equal(5);
-              docs[3].nid.should.equal(3);
-              docs[4].nid.should.equal(4);
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ name: 1, age: 1 }).exec(function(err, docs) {
-              docs.length.should.equal(5);
+      docs = await new Cursor(d, {}).sort({ name: 1, age: 1 }).exec();
+      expect(docs.map(doc => doc.nid)).toEqual([2, 5, 1, 3, 4]);
 
-              docs[0].nid.should.equal(2);
-              docs[1].nid.should.equal(5);
-              docs[2].nid.should.equal(1);
-              docs[3].nid.should.equal(3);
-              docs[4].nid.should.equal(4);
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ age: 1, name: 1 }).exec(function(err, docs) {
-              docs.length.should.equal(5);
+      docs = await new Cursor(d, {}).sort({ age: 1, name: 1 }).exec();
+      expect(docs.map(doc => doc.nid)).toEqual([3, 4, 5, 2, 1]);
 
-              docs[0].nid.should.equal(3);
-              docs[1].nid.should.equal(4);
-              docs[2].nid.should.equal(5);
-              docs[3].nid.should.equal(2);
-              docs[4].nid.should.equal(1);
-              return cb();
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ age: 1, name: -1 }).exec(function(err, docs) {
-              docs.length.should.equal(5);
-
-              docs[0].nid.should.equal(3);
-              docs[1].nid.should.equal(4);
-              docs[2].nid.should.equal(5);
-              docs[3].nid.should.equal(1);
-              docs[4].nid.should.equal(2);
-              return cb();
-            });
-          },
-        ],
-        done,
-      );
+      docs = await new Cursor(d, {}).sort({ age: 1, name: -1 }).exec();
+      expect(docs.map(doc => doc.nid)).toEqual([3, 4, 5, 1, 2]);
     });
 
     it("Similar data, multiple consecutive sorts", async () => {
-      var i,
-        j,
-        id,
-        companies = ["acme", "milkman", "zoinks"],
-        entities = [];
+      const companies = ["acme", "milkman", "zoinks"];
+      const entities: any[] = [];
 
-      async.waterfall(
-        [
-          function(cb) {
-            d.remove({}, { multi: true }, function(err) {
-              if (err) {
-                return cb(err);
-              }
+      await d.remove({}, { multi: true });
 
-              id = 1;
-              for (i = 0; i < companies.length; i++) {
-                for (j = 5; j <= 100; j += 5) {
-                  entities.push({
-                    company: companies[i],
-                    cost: j,
-                    nid: id,
-                  });
-                  id++;
-                }
-              }
+      let id = 1;
+      for (let i = 0; i < companies.length; i++) {
+        for (let j = 5; j <= 100; j += 5) {
+          entities.push({
+            company: companies[i],
+            cost: j,
+            nid: id,
+          });
+          id++;
+        }
+      }
 
-              async.each(
-                entities,
-                function(entity, callback) {
-                  d.insert(entity, function() {
-                    callback();
-                  });
-                },
-                function(err) {
-                  return cb();
-                },
-              );
-            });
-          },
-          function(cb) {
-            var cursor = new Cursor(d, {});
-            cursor.sort({ company: 1, cost: 1 }).exec(function(err, docs) {
-              docs.length.should.equal(60);
+      await Promise.all(entities.map(x => d.insert(x)));
 
-              for (var i = 0; i < docs.length; i++) {
-                docs[i].nid.should.equal(i + 1);
-              }
-              return cb();
-            });
-          },
-        ],
-        done,
-      );
+      const docs = await new Cursor(d, {}).sort({ company: 1, cost: 1 }).exec();
+      expect(docs.length).toEqual(60);
+
+      for (let i = 0; i < docs.length; i++) {
+        expect(docs[i].nid).toEqual(i + 1);
+      }
     });
-  }); // ===== End of 'Sorting' =====
+  });
 
-  describe("Projections", function() {
-    var doc1, doc2, doc3, doc4, doc0;
+  describe("Projections", () => {
+    let doc1: any, doc2: any, doc3: any, doc4: any, doc0: any;
 
     beforeEach(async () => {
       // We don't know the order in which docs wil be inserted but we ensure correctness by testing both sort orders
-      d.insert(
-        {
-          age: 5,
-          name: "Jo",
-          planet: "B",
-          toys: { bebe: true, ballon: "much" },
-        },
-        function(err, _doc0) {
-          doc0 = _doc0;
-          d.insert(
-            {
-              age: 57,
-              name: "Louis",
-              planet: "R",
-              toys: { ballon: "yeah", bebe: false },
-            },
-            function(err, _doc1) {
-              doc1 = _doc1;
-              d.insert(
-                {
-                  age: 52,
-                  name: "Grafitti",
-                  planet: "C",
-                  toys: { bebe: "kind of" },
-                },
-                function(err, _doc2) {
-                  doc2 = _doc2;
-                  d.insert({ age: 23, name: "LM", planet: "S" }, function(
-                    err,
-                    _doc3,
-                  ) {
-                    doc3 = _doc3;
-                    d.insert({ age: 89, planet: "Earth" }, function(
-                      err,
-                      _doc4,
-                    ) {
-                      doc4 = _doc4;
-                      return done();
-                    });
-                  });
-                },
-              );
-            },
-          );
-        },
-      );
+      doc0 = await d.insert({
+        age: 5,
+        name: "Jo",
+        planet: "B",
+        toys: { bebe: true, ballon: "much" },
+      });
+      doc1 = await d.insert({
+        age: 57,
+        name: "Louis",
+        planet: "R",
+        toys: { ballon: "yeah", bebe: false },
+      });
+      doc2 = await d.insert({
+        age: 52,
+        name: "Grafitti",
+        planet: "C",
+        toys: { bebe: "kind of" },
+      });
+      doc3 = await d.insert({ age: 23, name: "LM", planet: "S" });
+      doc4 = await d.insert({ age: 89, planet: "Earth" });
     });
 
     it("Takes all results if no projection or empty object given", async () => {
-      var cursor = new Cursor(d, {});
-      cursor.sort({ age: 1 }); // For easier finding
-      cursor.exec(function(err, docs) {
-        assert.isNull(err);
-        docs.length.should.equal(5);
-        assert.deepEqual(docs[0], doc0);
-        assert.deepEqual(docs[1], doc3);
-        assert.deepEqual(docs[2], doc2);
-        assert.deepEqual(docs[3], doc1);
-        assert.deepEqual(docs[4], doc4);
+      const cursor = new Cursor(d, {});
+      let docs = await cursor.sort({ age: 1 }).exec();
+      expect(docs).toEqual([doc0, doc3, doc2, doc1, doc4]);
 
-        cursor.projection({});
-        cursor.exec(function(err, docs) {
-          assert.isNull(err);
-          docs.length.should.equal(5);
-          assert.deepEqual(docs[0], doc0);
-          assert.deepEqual(docs[1], doc3);
-          assert.deepEqual(docs[2], doc2);
-          assert.deepEqual(docs[3], doc1);
-          assert.deepEqual(docs[4], doc4);
-
-          done();
-        });
-      });
+      docs = await cursor.projection({}).exec();
+      expect(docs).toEqual([doc0, doc3, doc2, doc1, doc4]);
     });
 
     it("Can take only the expected fields", async () => {
-      var cursor = new Cursor(d, {});
-      cursor.sort({ age: 1 }); // For easier finding
-      cursor.projection({ age: 1, name: 1 });
-      cursor.exec(function(err, docs) {
-        assert.isNull(err);
-        docs.length.should.equal(5);
-        // Takes the _id by default
-        assert.deepEqual(docs[0], { age: 5, name: "Jo", _id: doc0._id });
-        assert.deepEqual(docs[1], { age: 23, name: "LM", _id: doc3._id });
-        assert.deepEqual(docs[2], { age: 52, name: "Grafitti", _id: doc2._id });
-        assert.deepEqual(docs[3], { age: 57, name: "Louis", _id: doc1._id });
-        assert.deepEqual(docs[4], { age: 89, _id: doc4._id }); // No problems if one field to take doesn't exist
+      let cursor = new Cursor(d, {})
+        .sort({ age: 1 })
+        .projection({ age: 1, name: 1 });
+      let docs = await cursor.exec();
+      // Takes the _id by default
+      expect(docs).toEqual([
+        { age: 5, name: "Jo", _id: doc0._id },
+        { age: 23, name: "LM", _id: doc3._id },
+        { age: 52, name: "Grafitti", _id: doc2._id },
+        { age: 57, name: "Louis", _id: doc1._id },
+        { age: 89, _id: doc4._id },
+      ]);
 
-        cursor.projection({ age: 1, name: 1, _id: 0 });
-        cursor.exec(function(err, docs) {
-          assert.isNull(err);
-          docs.length.should.equal(5);
-          assert.deepEqual(docs[0], { age: 5, name: "Jo" });
-          assert.deepEqual(docs[1], { age: 23, name: "LM" });
-          assert.deepEqual(docs[2], { age: 52, name: "Grafitti" });
-          assert.deepEqual(docs[3], { age: 57, name: "Louis" });
-          assert.deepEqual(docs[4], { age: 89 }); // No problems if one field to take doesn't exist
-
-          done();
-        });
-      });
+      docs = await cursor.projection({ age: 1, name: 1, _id: 0 }).exec();
+      expect(docs).toEqual([
+        { age: 5, name: "Jo" },
+        { age: 23, name: "LM" },
+        { age: 52, name: "Grafitti" },
+        { age: 57, name: "Louis" },
+        { age: 89 },
+      ]);
     });
 
     it("Can omit only the expected fields", async () => {
-      var cursor = new Cursor(d, {});
-      cursor.sort({ age: 1 }); // For easier finding
-      cursor.projection({ age: 0, name: 0 });
-      cursor.exec(function(err, docs) {
-        assert.isNull(err);
-        docs.length.should.equal(5);
-        // Takes the _id by default
-        assert.deepEqual(docs[0], {
+      let cursor = new Cursor(d, {})
+        .sort({ age: 1 })
+        .projection({ age: 0, name: 0 });
+
+      let docs = await cursor.exec();
+      // Takes the _id by default
+      expect(docs).toEqual([
+        {
           planet: "B",
           _id: doc0._id,
           toys: { bebe: true, ballon: "much" },
-        });
-        assert.deepEqual(docs[1], { planet: "S", _id: doc3._id });
-        assert.deepEqual(docs[2], {
+        },
+        { planet: "S", _id: doc3._id },
+        {
           planet: "C",
           _id: doc2._id,
           toys: { bebe: "kind of" },
-        });
-        assert.deepEqual(docs[3], {
+        },
+        {
           planet: "R",
           _id: doc1._id,
           toys: { bebe: false, ballon: "yeah" },
-        });
-        assert.deepEqual(docs[4], { planet: "Earth", _id: doc4._id });
+        },
+        { planet: "Earth", _id: doc4._id },
+      ]);
 
-        cursor.projection({ age: 0, name: 0, _id: 0 });
-        cursor.exec(function(err, docs) {
-          assert.isNull(err);
-          docs.length.should.equal(5);
-          assert.deepEqual(docs[0], {
-            planet: "B",
-            toys: { bebe: true, ballon: "much" },
-          });
-          assert.deepEqual(docs[1], { planet: "S" });
-          assert.deepEqual(docs[2], { planet: "C", toys: { bebe: "kind of" } });
-          assert.deepEqual(docs[3], {
-            planet: "R",
-            toys: { bebe: false, ballon: "yeah" },
-          });
-          assert.deepEqual(docs[4], { planet: "Earth" });
-
-          done();
-        });
-      });
+      docs = await cursor.projection({ age: 0, name: 0, _id: 0 }).exec();
+      expect(docs).toEqual([
+        {
+          planet: "B",
+          toys: { bebe: true, ballon: "much" },
+        },
+        { planet: "S" },
+        { planet: "C", toys: { bebe: "kind of" } },
+        {
+          planet: "R",
+          toys: { bebe: false, ballon: "yeah" },
+        },
+        { planet: "Earth" },
+      ]);
     });
 
     it("Cannot use both modes except for _id", async () => {
