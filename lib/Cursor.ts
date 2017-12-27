@@ -3,15 +3,16 @@
  */
 import * as model from "./model";
 import Datastore from ".";
+import { Query, SortQuery } from "./Query";
 
 /** Create a new cursor for this collection */
-export default class Cursor {
+export default class Cursor<T = any> {
   private _limit: number;
   private _skip: number;
   private _sort: any;
-  private _projection: Record<string, any>;
+  private _projection: Record<string, any> = {};
 
-  constructor(private db: Datastore, private query = {}) {}
+  constructor(private db: Datastore, private query: Query = {}) {}
 
   /** Set a limit to the number of results */
   limit(limit: number) {
@@ -25,11 +26,8 @@ export default class Cursor {
     return this;
   }
 
-  /**
-   * Sort results of the query
-   * @param {SortQuery} sortQuery - SortQuery is { field: order }, field can use the dot-notation, order is 1 for ascending and -1 for descending
-   */
-  sort(sortQuery) {
+  /** Sort results of the query */
+  sort(sortQuery: SortQuery<T>) {
     this._sort = sortQuery;
     return this;
   }
@@ -50,7 +48,6 @@ export default class Cursor {
   project(candidates) {
     const res = [];
     let action: number;
-    let keys;
 
     if (
       this._projection === undefined ||
@@ -63,7 +60,7 @@ export default class Cursor {
     delete this._projection._id;
 
     // Check for consistency
-    keys = Object.keys(this._projection);
+    let keys = Object.keys(this._projection);
     keys.forEach(k => {
       if (action !== undefined && this._projection[k] !== action) {
         throw new Error("Can't both keep and omit fields except for _id");

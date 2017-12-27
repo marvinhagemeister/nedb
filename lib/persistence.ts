@@ -155,7 +155,7 @@ export default class Persistence {
    * Use an append-only format
    * @param {Array} newDocs Can be empty if no doc was updated/removed
    */
-  async persistNewState(newDocs) {
+  async persistNewState(newDocs: any[]) {
     // In-memory only datastore
     if (this.inMemoryOnly) return;
 
@@ -268,44 +268,4 @@ export default class Persistence {
  */
 export function ensureDirectoryExists(dir: string) {
   return storage.mkdir(dir);
-}
-
-/**
- * Return the path the datafile if the given filename is relative to the
- * directory where Node Webkit stores data for this application. Probably the
- * best place to store data
- */
-export function getNWAppFilename(appName: string, relativeFilename: string) {
-  let home;
-
-  switch (process.platform) {
-    case "win32":
-      home = process.env.LOCALAPPDATA || process.env.APPDATA;
-      if (!home) {
-        throw new Error("Couldn't find the base application data folder");
-      }
-      home = path.join(home, appName);
-      break;
-    case "darwin":
-      home = process.env.HOME;
-      if (!home) {
-        throw new Error("Couldn't find the base application data directory");
-      }
-      home = path.join(home, "Library", "Application Support", appName);
-      break;
-    case "linux":
-      home = process.env.HOME;
-      if (!home) {
-        throw new Error("Couldn't find the base application data directory");
-      }
-      home = path.join(home, ".config", appName);
-      break;
-    default:
-      throw new Error(
-        "Can't use the Node Webkit relative path for platform " +
-          process.platform,
-      );
-  }
-
-  return path.join(home, "nedb-data", relativeFilename);
 }

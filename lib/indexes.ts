@@ -48,8 +48,8 @@ export interface IndexOptions {
  */
 export default class Index {
   private fieldName: string;
-  private unique: boolean;
-  private sparse: boolean;
+  public unique: boolean;
+  public sparse: boolean;
   private tree: BinarySearchTree;
 
   constructor(options: IndexOptions) {

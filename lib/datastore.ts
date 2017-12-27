@@ -5,9 +5,10 @@ import * as model from "./model";
 import Index, { IndexOptions } from "./indexes";
 import Cursor from "./Cursor";
 import { isDate } from "util";
+import { Query } from "./Query";
+import { uid } from "./util";
 
-var customUtils = require("./customUtils"),
-  async = require("async"),
+const async = require("async"),
   _ = require("underscore");
 
 export interface UpdateOptions {
@@ -77,16 +78,15 @@ export default class Datastore extends EventEmitter {
   // Indexed by field name, dot notation can be used
   // _id is always indexed and since _ids are generated randomly the underlying
   // binary is always well-balanced
-  public indexes = {
+  public indexes: Record<string, Index> = {
     _id: new Index({ fieldName: "_id", unique: true }),
   };
-  private ttlIndexes = {};
+  private ttlIndexes: Record<string, any> = {};
 
   constructor(options: DataStoreOptions = {}) {
     super();
-    var filename;
 
-    filename = options.filename;
+    const filename = options.filename;
     this.inMemoryOnly = options.inMemoryOnly || false;
     this.autoload = options.autoload || false;
     this.timestampData = options.timestampData || false;
@@ -209,8 +209,10 @@ export default class Datastore extends EventEmitter {
 
     // If an error happened, we need to rollback the insert on all other indexes
     if (error) {
-      for (i = 0; i < failingIndex; i += 1) {
-        this.indexes[keys[i]].remove(doc);
+      if (failingIndex !== undefined) {
+        for (i = 0; i < failingIndex; i += 1) {
+          this.indexes[keys[i]].remove(doc);
+        }
       }
 
       throw error;
@@ -249,8 +251,10 @@ export default class Datastore extends EventEmitter {
 
     // If an error happened, we need to rollback the update on all other indexes
     if (error) {
-      for (i = 0; i < failingIndex; i += 1) {
-        this.indexes[keys[i]].revertUpdate(oldDoc, newDoc);
+      if (failingIndex !== undefined) {
+        for (i = 0; i < failingIndex; i += 1) {
+          this.indexes[keys[i]].revertUpdate(oldDoc, newDoc);
+        }
       }
 
       throw error;
@@ -268,11 +272,10 @@ export default class Datastore extends EventEmitter {
    *
    * @param {Query} query
    * @param {Boolean} dontExpireStaleDocs Optional, defaults to false, if true don't remove stale docs. Useful for the remove function which shouldn't be impacted by expirations
-   * @param {Function} callback Signature err, candidates
    */
-  async getCandidates(query, dontExpireStaleDocs = false) {
-    var indexNames = Object.keys(this.indexes),
-      usableQueryKeys;
+  async getCandidates(query: Query, dontExpireStaleDocs = false) {
+    let indexNames = Object.keys(this.indexes);
+    let usableQueryKeys;
 
     async.waterfall([
       // STEP 1: get candidates list by checking indexes from most to least frequent usecase
@@ -406,8 +409,9 @@ export default class Datastore extends EventEmitter {
    * Create a new _id that's not already in use
    */
   createNewId() {
-    var tentativeId = customUtils.uid(16);
-    // Try as many times as needed to get an unused _id. As explained in customUtils, the probability of this ever happening is extremely small, so this is O(1)
+    let tentativeId = uid(16);
+    // Try as many times as needed to get an unused _id. The probability of
+    // this ever happening is extremely small, so this is O(1)
     if (this.indexes._id.getMatching(tentativeId).length > 0) {
       tentativeId = this.createNewId();
     }
@@ -416,10 +420,10 @@ export default class Datastore extends EventEmitter {
 
   /**
    * Prepare a document (or array of documents) to be inserted in a database
-   * Meaning adds _id and timestamps if necessary on a copy of newDoc to avoid any side effect on user input
-   * @api private
+   * Meaning adds _id and timestamps if necessary on a copy of newDoc to avoid
+   * any side effect on user input
    */
-  prepareDocumentForInsertion(newDoc) {
+  private prepareDocumentForInsertion(newDoc) {
     var preparedDoc;
 
     if (Array.isArray(newDoc)) {
@@ -439,10 +443,10 @@ export default class Datastore extends EventEmitter {
   }
 
   /**
-   * If newDoc is an array of documents, this will insert all documents in the cache
-   * @api private
+   * If newDoc is an array of documents, this will insert all documents in the
+   * cache
    */
-  _insertInCache(preparedDoc) {
+  private _insertInCache(preparedDoc) {
     if (Array.isArray(preparedDoc)) {
       this._insertMultipleDocsInCache(preparedDoc);
     } else {
@@ -451,11 +455,10 @@ export default class Datastore extends EventEmitter {
   }
 
   /**
-   * If one insertion fails (e.g. because of a unique constraint), roll back all previous
-   * inserts and throws the error
-   * @api private
+   * If one insertion fails (e.g. because of a unique constraint), roll back all
+   * previous inserts and throws the error
    */
-  _insertMultipleDocsInCache(preparedDocs) {
+  private _insertMultipleDocsInCache(preparedDocs) {
     var i, failingI, error;
 
     for (i = 0; i < preparedDocs.length; i += 1) {
@@ -469,8 +472,10 @@ export default class Datastore extends EventEmitter {
     }
 
     if (error) {
-      for (i = 0; i < failingI; i += 1) {
-        this.removeFromIndexes(preparedDocs[i]);
+      if (failingI !== undefined) {
+        for (i = 0; i < failingI; i += 1) {
+          this.removeFromIndexes(preparedDocs[i]);
+        }
       }
 
       throw error;
@@ -481,31 +486,29 @@ export default class Datastore extends EventEmitter {
     this.executor.push({ this: this, fn: this._insert, arguments: args });
   }
 
-  /**
-   * Count all documents matching the query
-   * @param {Object} query MongoDB-style query
-   */
-  async count(query: any): Promise<number> {
+  /** Count all documents matching the query */
+  async count(query: Query): Promise<number> {
     const docs = await new Cursor(this, query).exec();
     return docs.length;
   }
 
   /**
    * Find all documents matching the query
-   * @param {Object} query MongoDB-style query
    * @param {Object} projection MongoDB-style projection
    */
-  async find(query: any, projection = {}) {
+  async find(query: Query, projection = {}) {
     return new Cursor(this, query).projection(projection).exec();
   }
 
   /**
    * Find one document matching the query
-   * @param {Object} query MongoDB-style query
    * @param {Object} projection MongoDB-style projection
    */
-  async findOne(query, projection = {}) {
-    return new Cursor(this, query).projection(projection).limit(1);
+  async findOne(query: Query, projection = {}) {
+    return new Cursor(this, query)
+      .projection(projection)
+      .limit(1)
+      .exec();
   }
 
   /**
@@ -513,7 +516,7 @@ export default class Datastore extends EventEmitter {
    * @param {Object} query
    * @param {Object} updateQuery
    */
-  async _update(query, updateQuery, options: UpdateOptions) {
+  async _update(query: Query, updateQuery, options: UpdateOptions) {
     await this._tryCreate(query, updateQuery, options.upsert || false);
     return await this._tryUpdate(
       query,
@@ -523,7 +526,7 @@ export default class Datastore extends EventEmitter {
     );
   }
 
-  private async _tryCreate(query: any, updateQuery: any, upsert: boolean) {
+  private async _tryCreate(query: Query, updateQuery: any, upsert: boolean) {
     // If upsert option is set, check whether we need to insert the doc
     if (!upsert) return;
 
@@ -554,7 +557,7 @@ export default class Datastore extends EventEmitter {
   }
 
   private async _tryUpdate(
-    query: any,
+    query: Query,
     updateQuery: any,
     multi: boolean,
     returnUpdatedDocs: boolean,
@@ -609,11 +612,10 @@ export default class Datastore extends EventEmitter {
   /**
    * Remove all docs matching the query
    * For now very naive implementation (similar to update)
-   * @param {Object} query
    * @param {Object} options Optional options
    *                 options.multi If true, can update multiple documents (defaults to false)
    */
-  async _remove(query, options: { multi?: boolean } = {}) {
+  async _remove(query: Query, options: { multi?: boolean } = {}) {
     let numRemoved = 0;
     const removedDocs = [];
     const multi = options.multi || false;
